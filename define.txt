@@ -1,0 +1,17 @@
+    base_prompt = "I want to give you a word, and then you pick the 
+    world's top 3 experts in the field that relates to the word I 
+    ask you to define, and tell me what they would define that word 
+    as. "
+
+
+        prompt = f"Define the term \"{term}\", in the following 
+        context: \"{parent_message.content}\". Cross reference using 
+        online resources. Return your answer in bullet points"
+        response = agent.get_response(base_prompt + prompt)
+
+
+
+        prompt = f"Define the term \"{term}\", cross reference using 
+        online resources. Return your answer in bullet points"
+
+        response = agent.get_response(base_prompt + prompt)
