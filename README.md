@@ -90,6 +90,8 @@ python start.py
 
 ### Voice Recording
 
+![Voice Recording Interface](screenshot.png)
+
 1. Join a voice channel and use `/join` to bring the bot in
 2. Click the "Start" button to begin recording
 3. Speak your message
@@ -97,6 +99,8 @@ python start.py
 5. The bot will transcribe and process your message
 
 ### Message Summarization
+
+![Message Summarization](screenshot2.png)
 
 1. React to any message with the 🤖 emoji
 2. The bot will generate a summary with a title
