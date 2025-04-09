@@ -65,9 +65,9 @@ def extract_ideas():
         if isinstance(result, str):
             for item in result.split(':::'):
                 if '|' in item:
-                    text, score_part = item.rsplit('|', 2)
+                    text_part, score_part = item.rsplit('|', 2)
                     score = int(score_part.strip('|'))
-                    ideas.append({"text": text.strip(), "score": score})
+                    ideas.append({"text": text_part.strip(), "score": score})
                 else:
                     ideas.append({"text": item.strip(), "score": 0})
         else:

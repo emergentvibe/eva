@@ -2,3 +2,9 @@ openai
 py-cord
 PyNaCl
 tiktoken
+openai-whisper
+python-dotenv
+flask==2.3.3
+anthropic==0.48.0
+gunicorn==21.2.0
+requests

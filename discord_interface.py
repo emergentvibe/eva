@@ -6,13 +6,42 @@ from dotenv import load_dotenv
 import whisper
 import wave
 import io
-
-from summarisation_service import get_summarization_service
+import time
+import sys
+import requests
+from utils import (
+    summarize_message, 
+    get_related_topics, 
+    fact_check_claim, 
+    get_definition, 
+    extract_atomic_ideas,
+    check_api_health
+)
 
 load_dotenv()
 discord_bot_token = os.getenv('DISCORD_BOT_TOKEN')
 anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
+
+# Check API health before starting
+print("Checking API health...")
+max_retries = 5
+retry_count = 0
+api_ready = False
+
+while retry_count < max_retries and not api_ready:
+    if check_api_health():
+        api_ready = True
+        print("API is healthy and ready!")
+    else:
+        retry_count += 1
+        print(f"API not ready, retrying in 5 seconds... (Attempt {retry_count}/{max_retries})")
+        time.sleep(5)
+
+if not api_ready:
+    print("ERROR: API is not available. Please make sure the API is running.")
+    print("You can start the API with: python -m api_module.run")
+    sys.exit(1)
 
 # Set up intents we actually need
 intents = discord.Intents.default()
@@ -77,26 +106,6 @@ async def once_done(sink: discord.sinks, channel: discord.TextChannel):
     
     await msg.edit(content=f"Finished processing audio for: {', '.join(recorded_users)}")
 
-# Initialize services
-summarization_service = get_summarization_service()
-
-# Placeholder functions for other services
-async def get_related_topics(message: str) -> str:
-    # TODO: Implement related topics service
-    return "Related topics service not yet implemented"
-
-async def fact_check_claim(claim: str) -> str:
-    # TODO: Implement fact checking service
-    return "Fact checking service not yet implemented"
-
-async def get_definition(term: str, context: str = None) -> str:
-    # TODO: Implement definition service
-    return "Definition service not yet implemented"
-
-async def get_chat_response(message: str) -> str:
-    # TODO: Implement chat service
-    return "Chat service not yet implemented"
-
 async def reply_to_user(ctx, reply):
     await ctx.send(reply)
 
@@ -115,7 +124,7 @@ async def join(ctx: discord.context):
     vc = await ctx.author.voice.channel.connect()  # Connect to the voice channel the author is in.
     connections.update({ctx.guild.id: vc})  # Updating the cache with the guild and channel.
     # Send recording view
-    await ctx.respond("You Can Start recording!", view = MyView(ctx, vc))
+    await ctx.respond("You Can Start recording!", view = VoiceControlView(ctx, vc))
 
 @client.slash_command(description="Leave")
 async def leave(ctx: discord.context):
@@ -148,15 +157,15 @@ async def on_reaction_add(reaction, user):
             message = reaction.message
             await message.reply("Generating related topics to think about. Please wait...")
             response = await get_related_topics(message.content)
-            lst_str = response[1:-1].split(',')
-            lst = [s.strip()[1:-1] for s in lst_str][:10]
+            lst_str = response.split('\n')
+            lst = [s.strip() for s in lst_str if s.strip()][:10]
             
             tags = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
-            lst = [f"{tags[i]} {s}" for i, s in enumerate(lst)]
-            lst = '\n'.join(lst)
-            print(lst)
-            reply = await message.reply('\n' + lst)
-            for i in range(len(lst)):
+            formatted_lst = [f"{tags[i]} {s}" for i, s in enumerate(lst) if i < len(tags)]
+            formatted_str = '\n'.join(formatted_lst)
+            print(formatted_str)
+            reply = await message.reply('\n' + formatted_str)
+            for i in range(len(formatted_lst)):
                 await reply.add_reaction(tags[i])
         elif reaction.emoji == "✅":
             message = reaction.message
@@ -173,8 +182,8 @@ async def on_reaction_add(reaction, user):
                 messages.append(msg.content)
             messages_text = '\n'.join(messages[::-1])
             
-            # Use the summarization service
-            result = await summarization_service.generate_summary(messages_text)
+            # Use the summarization service via API
+            result = summarize_message(messages_text)
             response = f"**{result['title']}**\n\n{result['summary']}"
             reply = await message.reply(response)
 
@@ -192,14 +201,12 @@ async def summarize(ctx):
         messages.append(msg.content)
     messages_text = '\n'.join(messages[::-1])
     
-    # Use the summarization service
-    result = await summarization_service.generate_summary(messages_text)
+    # Use the summarization service via API
+    result = summarize_message(messages_text)
     response = f"**{result['title']}**\n\n{result['summary']}"
     await reply_to_user(ctx, response)
 
-summarize.help = "Summarizes the given text into a shorter, more concise version."
-
-@client.command(description="related-channel")
+@client.slash_command(description="related-channel")
 async def related(ctx):
     await reply_to_user(ctx, "Generating related topics to think about. Please wait...")
     try:
@@ -214,31 +221,78 @@ async def related(ctx):
     response = await get_related_topics(message_str)
     await reply_to_user(ctx, response)
 
-related.help = "Searches the web for related topics based on the given query."
-
-@client.command(description="define")
+@client.slash_command(description="define")
 async def define(ctx):
-    await ctx.message.reply("Searching online dictionaries. Please wait...")
-
-    # Check if the command is a reply to a message in a thread
-    if isinstance(ctx.message.reference.resolved, discord.Message):
+    await ctx.respond("Searching for definition. Please wait...")
+    
+    # Check if the command has context from a reply
+    if ctx.message and ctx.message.reference and ctx.message.reference.resolved:
         parent_message = ctx.message.reference.resolved
         term = ctx.message.content.replace('!define', '').strip()
-
-        await ctx.send(f"Defining term {term}, in content: {parent_message.content}")
+        
+        await ctx.send(f"Defining term {term}, in context: {parent_message.content}")
         response = await get_definition(term, parent_message.content)
         await reply_to_user(ctx, response)
     else:
-        term = ctx.message.content.replace('!define', '').strip()
-        response = await get_definition(term)
-        await reply_to_user(ctx, response)
-        await ctx.send("If you wish to provide context, use this command in a thread reply for the message you wish to use as context.")
+        # Direct command without reply context
+        term = ctx.message.content.replace('!define', '').strip() if ctx.message else ""
+        if not term:
+            # Try to get from interaction options if available
+            try:
+                term = ctx.options.term
+            except:
+                term = ""
+        
+        if term:
+            response = await get_definition(term)
+            await reply_to_user(ctx, response)
+        else:
+            await ctx.respond("Please provide a term to define. You can also reply to a message for context.")
 
-define.help = "Returns the definition to a term."
+@client.slash_command(description="extract")
+async def extract(ctx):
+    """Extract key ideas from a message
+    
+    Can be used directly or as a reply to another message
+    """
+    await ctx.respond("Extracting key ideas. Please wait...")
+    
+    # Check if used as a reply
+    if ctx.message and ctx.message.reference and ctx.message.reference.resolved:
+        # Message to extract from
+        source_message = ctx.message.reference.resolved.content
+    else:
+        # Take content from the command itself
+        source_message = ctx.message.content.replace('!extract', '').strip() if ctx.message else ""
+        if not source_message:
+            # Try to get from interaction options
+            try:
+                source_message = ctx.options.text
+            except:
+                source_message = ""
+    
+    if not source_message:
+        await ctx.respond("Please provide text to extract ideas from, or use this command as a reply to a message.")
+        return
+    
+    # Call the extraction API
+    ideas = await extract_atomic_ideas(source_message)
+    
+    if not ideas:
+        await ctx.respond("No key ideas were extracted. Try with a longer or more detailed text.")
+        return
+    
+    # Format and send the response
+    response = "**Key Ideas Extracted:**\n\n"
+    for i, idea in enumerate(ideas[:10]):  # Limit to top 10 ideas
+        response += f"{i+1}. {idea['text']} (Score: {idea['score']})\n"
+    
+    await reply_to_user(ctx, response)
 
-@client.command(description="exit")
+@client.slash_command(description="exit")
 async def exit(ctx):
-    exit()
+    await ctx.respond("Shutting down...")
+    sys.exit(0)
 
 @client.event
 async def on_message(message):
@@ -251,8 +305,29 @@ async def on_message(message):
         ctx = await client.get_context(message)
         
         async with ctx.typing():
-            response = await get_chat_response(message.content)
-        
-        await reply_to_user(ctx, response)
+            # Use the custom extraction API for general chat responses
+            try:
+                url = f"http://localhost:5000/api/custom_extraction"
+                prompt = """Respond to the user's message in a helpful, informative, and conversational way. 
+                If the user is asking a question, provide an answer. If they're making a comment, respond appropriately."""
+                
+                payload = {
+                    "text": message.content,
+                    "prompt": prompt,
+                    "parse_score": False,
+                    "temperature": 0.7
+                }
+                
+                response = requests.post(url, json=payload, timeout=60)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    await reply_to_user(ctx, result['result'])
+                else:
+                    await reply_to_user(ctx, "I'm sorry, I couldn't process your message right now.")
+            except Exception as e:
+                print(f"[ERROR] Exception in chat response: {str(e)}")
+                await reply_to_user(ctx, "I'm sorry, I encountered an error while processing your message.")
 
-client.run(discord_bot_token)
+if __name__ == "__main__":
+    client.run(discord_bot_token)

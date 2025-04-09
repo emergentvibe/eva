@@ -15,7 +15,7 @@ class SummarizationService:
     # Constants for title generation
     TITLE_MAX_TOKENS = 80
     TITLE_TEMPERATURE = 0.3
-    SUMMARY_TEMPERATURE = 0.3
+    SUMMARY_TEMPERATURE = 0.4
     SUMMARY_MAX_TOKENS = 1000
     MERGE_MAX_TOKENS = 2000
 

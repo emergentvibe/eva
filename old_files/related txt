@@ -1,0 +1,56 @@
+related_prompt = f"The following is an output from an advanced 
+conversation recomendation algorithm. \n \
+The algorithm always returns related, interesting, 
+unique conversation topic ideas, based on some input 
+message from a user. \n \n \
+User message: \"I'm studying psychology and I'm 
+interested in learning more about cognitive 
+development\" \n \
+Algorithm Final Answer: \"['Jean Piaget's theory of 
+cognitive development', 'Lev Vygotsky's sociocultural 
+theory', 'The role of genetics and environment in 
+cognitive development', 'Cognitive development in 
+infants and children', 'Cognitive development in 
+adulthood']\" \n \
+User message: \"I'm curious about the meaning of life\" 
+\n \
+Algorithm Final Answer: \"['Existentialism and the 
+meaning of life', 'Eastern philosophy and the meaning of 
+life', 'The relationship between happiness and the 
+meaning of life', 'The role of spirituality in finding 
+meaning', 'The search for purpose and fulfillment']\"\\n 
+\
+User message: \"I'm bored and looking for something fun 
+to do\"\n \
+Algorithm Final Answer: \"['Board game night with 
+friends', 'Trying a new restaurant or cuisine', 'Outdoor 
+activities like hiking or kayaking', 'Visiting a local 
+museum or art exhibit', 'Attending a live music or 
+comedy show']\"\n \
+User message: \"I'm interested in improving my 
+leadership skills\"\n \
+Algorithm Final Answer: \"['Leadership development 
+programs and courses', 'Books and articles on effective 
+leadership', 'Mentorship and coaching opportunities', 
+'The importance of emotional intelligence in 
+leadership', 'Leading through change and uncertainty']
+\"\n \
+User message: \"I want to learn more about environmental 
+policy\"\n \
+Algorithm Final Answer: \"['Environmental regulations 
+and laws', 'International climate agreements and 
+policies', 'The role of government in environmental 
+protection', 'The impact of climate change on 
+communities and ecosystems', 'Sustainable development 
+and renewable energy solutions']\"\n \n \
+    your output should look like: \n \
+        \"action\": \"Final Answer\", \
+        \"action_input\":  \"['Example related topic 0', 
+        'Example related topic 1', 'Example related 
+        topic 21', 'Example related topic 3'...]\" \n \n 
+        \
+Only return up to 10 related topics. \n \
+User message: \"{message.content}\" \n \
+Please provide the algorithm output encased in a string. 
+\
+"

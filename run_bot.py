@@ -1,7 +1,29 @@
 import discord
 import datetime
+import time
+import sys
 from credentials import DISCORD_BOT_TOKEN
-from utils import get_transcripts_from_audio_data, answer_prompts, summarize_message
+from utils import get_transcripts_from_audio_data, answer_prompts, summarize_message, check_api_health
+
+# Check API health before starting
+print("Checking API health...")
+max_retries = 5
+retry_count = 0
+api_ready = False
+
+while retry_count < max_retries and not api_ready:
+    if check_api_health():
+        api_ready = True
+        print("API is healthy and ready!")
+    else:
+        retry_count += 1
+        print(f"API not ready, retrying in 5 seconds... (Attempt {retry_count}/{max_retries})")
+        time.sleep(5)
+
+if not api_ready:
+    print("ERROR: API is not available. Please make sure the API is running.")
+    print("You can start the API with: python -m api_module.run")
+    sys.exit(1)
 
 # Init bot
 bot = discord.Bot(intents=discord.Intents.all())  # We need message content and reaction intents
@@ -131,7 +153,7 @@ async def on_reaction_add(reaction, user):
         processing_msg = await message.channel.send("Summarizing message, please wait...")
         
         try:
-            # Get the summary from the summarization service
+            # Get the summary from the summarization service via API
             result = summarize_message(message.content)
             
             # Send the title first
@@ -156,4 +178,5 @@ async def on_reaction_add(reaction, user):
             await processing_msg.delete()
 
 # Run bot
-bot.run(DISCORD_BOT_TOKEN) 
+if __name__ == "__main__":
+    bot.run(DISCORD_BOT_TOKEN) 
