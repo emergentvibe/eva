@@ -5,7 +5,7 @@ Script to run the Eva API service.
 """
 import os
 from dotenv import load_dotenv
-from api_module.api import create_app, run_app
+from semantic_engine_api.api import create_app, run_app
 
 if __name__ == '__main__':
     # Load environment variables

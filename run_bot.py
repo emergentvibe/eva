@@ -22,7 +22,7 @@ while retry_count < max_retries and not api_ready:
 
 if not api_ready:
     print("ERROR: API is not available. Please make sure the API is running.")
-    print("You can start the API with: python -m api_module.run")
+    print("You can start the API with: python -m semantic_engine_api.run")
     sys.exit(1)
 
 # Init bot

@@ -60,4 +60,4 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-api_module/instance/ 
+semantic_engine_api/instance/ 

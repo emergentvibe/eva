@@ -29,7 +29,7 @@ def start_api():
     """Start the API service"""
     logger.info("Starting Eva API service...")
     try:
-        api_cmd = [sys.executable, "-m", "api_module.run"]
+        api_cmd = [sys.executable, "-m", "semantic_engine_api.run"]
         api_process = subprocess.Popen(
             api_cmd,
             stdout=subprocess.PIPE,
