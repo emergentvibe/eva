@@ -1,5 +1,9 @@
 # Eva - AI-Powered Discord Bot
 
+<p align="center">
+  <img src="logo.png" alt="Eva Logo" width="200"/>
+</p>
+
 Eva is an advanced Discord bot that combines voice interaction, text processing, and AI capabilities to provide a rich interactive experience. It features voice recording, transcription, summarization, and intelligent text processing.
 
 ## Features
