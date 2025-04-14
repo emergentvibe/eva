@@ -2,6 +2,7 @@ import os
 import whisper
 import requests
 import json
+import datetime
 
 # Initialize whisper model for audio transcription
 model = whisper.load_model("small")
@@ -76,11 +77,43 @@ async def answer_prompts(transcripts, channel):
     print("[DEBUG] Starting answer_prompts")
     print(f"[DEBUG] Received transcripts type: {type(transcripts)}")
     print(f"[DEBUG] Received transcripts: {transcripts}")
+    
+    # Create timestamp for thread name
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    thread_name = f"Transcript {timestamp}"
+    
+    # Create a message to start the thread from
+    initial_message = await channel.send(f"New voice transcription completed at {timestamp}")
+    
+    # Create the thread
+    thread = await initial_message.create_thread(name=thread_name)
+    print(f"[DEBUG] Created thread: {thread_name}")
+    
+    # First message in thread summarizing participants
+    participants = ", ".join(transcripts.keys())
+    await thread.send(f"Participants: {participants}")
 
     for user_id, text in transcripts.items():
         print(f"[DEBUG] Processing response for user: {user_id}")
-        await channel.send(f"{user_id} said: {text}")
-        print(f"[DEBUG] Sent response for user: {user_id}")
+        
+        # Format the user ID and prefix
+        prefix = f"{user_id} said: "
+        
+        # Calculate available characters (Discord limit - prefix length - some buffer)
+        available_chars = 1900 - len(prefix)
+        
+        # Split the text into chunks of available size
+        text_chunks = [text[i:i+available_chars] for i in range(0, len(text), available_chars)]
+        
+        # Send each chunk as a separate message in the thread
+        for i, chunk in enumerate(text_chunks):
+            if i == 0:
+                # First chunk includes the user ID
+                await thread.send(f"{prefix}{chunk}")
+            else:
+                # Continuation chunks
+                await thread.send(f"(continued) {chunk}")
+            print(f"[DEBUG] Sent chunk {i+1}/{len(text_chunks)} for user: {user_id} in thread")
 
 async def get_related_topics(message: str) -> str:
     """Get related topics for a message
