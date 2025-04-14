@@ -85,7 +85,7 @@ class SummarizationService:
                 temperature=self.SUMMARY_TEMPERATURE,
                 messages=[{
                     "role": "user",
-                    "content": "You are a highly skilled editor. Create a detailed analysis that captures the key points and main ideas of the following journal entry text while improving flow and clarity. The user is journaling in a stream of consciousness style. journal entry: " + chunk
+                    "content": "Create a short summary that captures the key points and main ideas of the following conversation between users, clearly listing each user's contribution: " + chunk
                 }]
             )
 
@@ -111,7 +111,7 @@ class SummarizationService:
                 temperature=self.SUMMARY_TEMPERATURE,
                 messages=[{
                     "role": "user",
-                    "content": f"You are a skilled editor merging multiple summaries into a single coherent document. Maintain the key points while ensuring smooth transitions and avoiding redundancy. Below are summaries of different parts of a longer document. Please merge them into a single coherent summary:\n\n{summaries_text}"
+                    "content": f"You are a skilled editor merging multiple summaries of longer conversation into a single coherent document. Maintain the key points while ensuring smooth transitions and avoiding redundancy. Below are summaries of different parts of a longer document. Please merge them into a single coherent summary:\n\n{summaries_text}"
                 }]
             )
 

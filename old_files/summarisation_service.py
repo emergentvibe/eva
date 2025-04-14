@@ -82,7 +82,7 @@ class SummarizationService:
                 temperature=self.SUMMARY_TEMPERATURE,
                 messages=[{
                     "role": "user",
-                    "content": "You are a highly skilled editor. Create a detailed analysis that captures the key points and main ideas of the following journal entry text while improving flow and clarity. The user is journaling in a stream of consciousness style. journal entry: " + chunk
+                    "content": "Create a short summary that captures the key points and main ideas of the following conversation between users, clearly listing each user's contribution: " + chunk
                 }]
             )
 

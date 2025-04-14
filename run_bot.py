@@ -132,12 +132,82 @@ async def leave(ctx: discord.context):
     else:
         await ctx.respond("I am currently not Connected")  # Respond with this if we aren't recording.
 
+@bot.command(description="Summarize recent messages")
+async def summarize(ctx, messages: discord.Option(int, "Number of messages to summarize", min_value=2, max_value=100, default=10)):
+    """Summarize the specified number of recent messages in the channel
+    
+    Args:
+        ctx (discord.context): Discord context
+        messages (int): Number of messages to summarize (default: 10)
+    """
+    # Send a processing message
+    processing_msg = await ctx.respond(f"Summarizing the last {messages} messages, please wait...")
+    
+    try:
+        # Fetch message history - slash commands don't appear in history, so no need to filter them out
+        message_history = []
+        message_count = 0
+        
+        async for message in ctx.channel.history(limit=100):  # Set higher limit to find enough non-bot messages
+            # Skip bot messages (optional, remove if you want to include bot messages)
+            if message.author.bot:
+                continue
+                
+            # Add to history with author name
+            message_history.append(f"{message.author.display_name}: {message.content}")
+            message_count += 1
+            
+            # Stop once we have enough messages
+            if message_count >= messages:
+                break
+        
+        # Reverse to get chronological order
+        message_history.reverse()
+        
+        # Skip if no messages found
+        if not message_history:
+            await processing_msg.edit(content="No valid messages found to summarize.")
+            return
+            
+        # Join all messages into a single text with line breaks
+        conversation_text = "\n".join(message_history)
+        
+        # Get the summary from the summarization service
+        result = summarize_message(conversation_text)
+        
+        # Create a thread for the summary
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        thread_name = f"Summary {timestamp}"
+        thread = await processing_msg.edit(content=f"**{result['title']}**", view=None)
+        thread = await thread.create_thread(name=thread_name)
+        
+        # Split the summary into chunks of 1900 characters (leaving room for formatting)
+        summary_chunks = [result['summary'][i:i+1900] for i in range(0, len(result['summary']), 1900)]
+        
+        # Send each chunk in the thread
+        for chunk in summary_chunks:
+            await thread.send(chunk)
+            
+    except Exception as e:
+        import traceback
+        print(f"Error in summarize command: {e}")
+        print(traceback.format_exc())
+        await processing_msg.edit(content=f"Sorry, I couldn't summarize those messages. Error: {str(e)}")
+
 #login event
 @bot.event
 async def on_ready():
     """Prints message to console once we successfully load the bot
     """
     print('We have logged in as {0.user}'.format(bot) + ' ' + datetime.datetime.utcnow().strftime("%m/%d/%Y %H:%M:%S UTC"))
+    
+    # Sync commands with Discord
+    print("Syncing commands with Discord...")
+    try:
+        synced = await bot.sync_commands()
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
 
 @bot.event
 async def on_reaction_add(reaction, user):

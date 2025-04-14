@@ -39,13 +39,13 @@ def summarize_message(content: str) -> dict:
         return {"title": "Error generating summary", "summary": f"An error occurred: {str(e)}"}
 
 async def get_transcripts_from_audio_data(audio_data):
-    """Process audio data and return transcripts
+    """Process audio data and return transcripts with timestamps
     
     Args:
         audio_data (dict): Dictionary of user IDs to audio data
         
     Returns:
-        dict: Dictionary of user IDs to transcripts
+        dict: Dictionary of user IDs to transcripts with timestamps
     """
     print("[DEBUG] Starting transcript processing")
     print(f"[DEBUG] Audio data received: {list(audio_data.keys())}")
@@ -58,25 +58,34 @@ async def get_transcripts_from_audio_data(audio_data):
             f.write(audio.getvalue())
         
         print(f"[DEBUG] Saved audio file: {filename}")
-        # Transcribe with whisper
-        text = model.transcribe(filename)["text"]
-        print(f"[DEBUG] Transcribed text: {text}")
+        # Transcribe with whisper and request word timestamps
+        result = model.transcribe(filename, word_timestamps=True)
+        
+        # Extract text and timestamps for each segment
+        segments = []
+        for segment in result["segments"]:
+            segments.append({
+                "text": segment["text"],
+                "start": segment["start"],
+                "end": segment["end"]
+            })
+        
+        print(f"[DEBUG] Transcribed {len(segments)} segments with timestamps")
         os.remove(filename)
-        transcripts[user_id] = text
+        transcripts[user_id] = segments
     
-    print(f"[DEBUG] Final transcripts: {transcripts}")
+    print(f"[DEBUG] Final transcripts with timestamps: {transcripts}")
     return transcripts
 
 async def answer_prompts(transcripts, channel):
-    """Process transcripts and send responses
+    """Process transcripts and send responses in a chronological timeline
     
     Args:
-        transcripts (dict): Dictionary of user IDs to transcripts
+        transcripts (dict): Dictionary of user IDs to transcripts with timestamps
         channel (discord.TextChannel): Channel to send responses in
     """
     print("[DEBUG] Starting answer_prompts")
     print(f"[DEBUG] Received transcripts type: {type(transcripts)}")
-    print(f"[DEBUG] Received transcripts: {transcripts}")
     
     # Create timestamp for thread name
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -92,28 +101,45 @@ async def answer_prompts(transcripts, channel):
     # First message in thread summarizing participants
     participants = ", ".join(transcripts.keys())
     await thread.send(f"Participants: {participants}")
-
-    for user_id, text in transcripts.items():
-        print(f"[DEBUG] Processing response for user: {user_id}")
+    
+    # Prepare an interlaced timeline
+    timeline = []
+    
+    # Collect all segments from all speakers
+    for user_id, segments in transcripts.items():
+        for segment in segments:
+            timeline.append({
+                "user_id": user_id,
+                "text": segment["text"],
+                "start": segment["start"],
+                "end": segment["end"]
+            })
+    
+    # Sort the combined timeline by start time
+    timeline.sort(key=lambda x: x["start"])
+    
+    # Format and send the timeline
+    await thread.send("## Conversation Timeline")
+    
+    current_message = ""
+    for item in timeline:
+        # Format: [00:15] @User: This is what they said
+        time_str = f"[{int(item['start']//60):02d}:{int(item['start']%60):02d}]"
+        line = f"{time_str} {item['user_id']}: {item['text']}\n"
         
-        # Format the user ID and prefix
-        prefix = f"{user_id} said: "
-        
-        # Calculate available characters (Discord limit - prefix length - some buffer)
-        available_chars = 1900 - len(prefix)
-        
-        # Split the text into chunks of available size
-        text_chunks = [text[i:i+available_chars] for i in range(0, len(text), available_chars)]
-        
-        # Send each chunk as a separate message in the thread
-        for i, chunk in enumerate(text_chunks):
-            if i == 0:
-                # First chunk includes the user ID
-                await thread.send(f"{prefix}{chunk}")
-            else:
-                # Continuation chunks
-                await thread.send(f"(continued) {chunk}")
-            print(f"[DEBUG] Sent chunk {i+1}/{len(text_chunks)} for user: {user_id} in thread")
+        # Check if adding this line would exceed Discord's message limit
+        if len(current_message + line) > 1900:
+            # Send current message and start a new one
+            await thread.send(current_message)
+            current_message = line
+        else:
+            current_message += line
+    
+    # Send any remaining content
+    if current_message:
+        await thread.send(current_message)
+    
+    print(f"[DEBUG] Sent interlaced timeline in thread")
 
 async def get_related_topics(message: str) -> str:
     """Get related topics for a message
