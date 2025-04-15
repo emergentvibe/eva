@@ -258,75 +258,65 @@ async def on_reaction_add(reaction, user):
         finally:
             # Delete the processing message
             await processing_msg.delete()
-
-# Add a message command version of explain that works directly with replies
+# A command to interact with the bot directly
 @bot.event
 async def on_message(message):
     # Don't respond to our own messages
     if message.author == bot.user:
         return
         
-    # Check if the message content starts with "!explain"
-    if message.content.lower().startswith("!explain"):
-        logger.info(f"Message command !explain triggered by {message.author.display_name}")
+    # Check if eva is tagged in the message
+    if bot.user.mentioned_in(message):
+        logger.info(f"EVA tagged by {message.author.display_name}")
         
         # Get the reply reference
-        if not message.reference or not message.reference.resolved:
-            await message.reply("Please use this command as a reply to the message you want explained.")
-            return
-            
-        # Get the target message from the reply
-        target_message = message.reference.resolved
+        if message.reference and message.reference.resolved:
+            reference_message = message.reference.resolved
+        else:
+            reference_message = None
         
-        # Get any additional explanation request (e.g., "!explain technical terms" -> "technical terms")
+        # Get any additional explanation request 
         parts = message.content.split(' ', 1)
-        explain_what = parts[1].strip() if len(parts) > 1 else ""
+        mention_message = parts[1].strip() if len(parts) > 1 else ""
         
         # Send a processing message
-        processing_msg = await message.reply("Generating explanation, please wait...")
+        processing_msg = await message.reply("Generating reply, please wait...")
         
         try:
             # Get usernames
-            author_username = target_message.author.display_name
-            requester_username = message.author.display_name
+            mentioning_username = message.author.display_name
+
+            messages = [
+                {"role": "user", "content": mentioning_username + ": " + mention_message}
+            ]
+            
+            # If there is a reference message, add it to the messages structure
+            if reference_message:
+                reference_username = reference_message.author.display_name
+                messages.insert(0, {"role": "user", "content": reference_username + ": " + reference_message.content})
             
             # Call the agent service with the explanation inquiry
-            logger.info(f"Calling agent API for explanation with request: {explain_what}")
-            explanation = await invoke_agent(
-                target_message.content, 
-                author_username, 
-                requester_username,
-                explain_what
+            logger.info(f"Calling agent API with request: {mention_message}")
+            reply = await invoke_agent(
+                messages, 
+                thread_id=str(message.channel.id) + ":" + str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             )
             
-            if not explanation or explanation.startswith("Error"):
-                logger.error(f"Agent API returned error: {explanation}")
-                await processing_msg.edit(content=f"Sorry, I couldn't explain that message: {explanation}")
+            if not reply or reply.startswith("Error"):
+                logger.error(f"Agent API returned error: {reply}")
+                await processing_msg.edit(content=f"Sorry, I couldn't explain that message: {reply}")
                 return
             
-            logger.info("Received explanation from agent API, creating thread")
+            logger.info("Received reply from agent API, sending reply")
             
-            # Create a thread for the explanation
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            thread_name = f"Explanation {timestamp}"
+            # Split the reply into chunks if needed (Discord has a 2000 character limit)
+            reply_chunks = [reply[i:i+1900] for i in range(0, len(reply), 1900)]
             
-            # Update the processing message with a reference to the original message
-            updated_msg = await processing_msg.edit(content=f"Explanation of {author_username}'s message:")
+            # Send the reply chunks in the same channel
+            for chunk in reply_chunks:
+                await message.channel.send(chunk)
             
-            # Create the thread
-            thread = await updated_msg.create_thread(name=thread_name)
-            
-            # Send the original message in the thread for context
-            await thread.send(f"**Original message from {author_username}:**\n{target_message.content}")
-            
-            # Split the explanation into chunks if needed (Discord has a 2000 character limit)
-            explanation_chunks = [explanation[i:i+1900] for i in range(0, len(explanation), 1900)]
-            
-            # Send the explanation chunks in the thread
-            for chunk in explanation_chunks:
-                await thread.send(chunk)
-            
-            logger.info(f"Successfully completed explanation for {message.author.display_name}")
+            logger.info(f"Successfully completed reply for {message.author.display_name}")
                 
         except Exception as e:
             # Log the full exception with traceback

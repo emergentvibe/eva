@@ -48,36 +48,26 @@ def summarize_message(content: str) -> dict:
         logger.error(traceback.format_exc())
         return {"title": "Error generating summary", "summary": f"An error occurred: {str(e)}"}
 
-async def invoke_agent(message_content: str, author_username: str, requester_username: str, explanation_request: str = "") -> str:
-    """Invoke the agent with a constructed inquiry
+async def invoke_agent(messages, thread_id=None):
+    """Invoke the agent with a list of messages and return the response
     
     Args:
-        message_content (str): Content of the message to explain
-        author_username (str): Username of the message author
-        requester_username (str): Username of the person making the request
-        explanation_request (str, optional): What aspect to explain. Defaults to "".
+        messages (list): List of message objects with role and content
+        thread_id (str, optional): Thread ID for the conversation. Defaults to None.
         
     Returns:
         str: Agent's response
     """
-    logger.info(f"Invoking agent via API for message from {author_username}, requested by {requester_username}")
-    logger.info(f"Message content snippet: {message_content[:100]}...")
-    
-    if explanation_request:
-        logger.info(f"Explanation request: {explanation_request}")
+    logger.info(f"Invoking agent via API with {len(messages)} message(s)")
     
     try:
-        # Construct the inquiry here rather than in the API
-        if explanation_request:
-            inquiry = f"{requester_username} is asking: Can you explain what {author_username} meant in this message, specifically about {explanation_request}? Message: {message_content}"
-        else:
-            inquiry = f"{requester_username} is asking: Can you explain what {author_username} meant in this message? Message: {message_content}"
-        
-        logger.debug(f"Full inquiry: {inquiry}")
         url = f"{API_BASE_URL}/agent"
-        payload = {"inquiry": inquiry}
+        payload = {
+            "messages": messages,
+            "thread_id": thread_id
+        }
         
-        logger.info(f"Sending request to {url}")
+        logger.info(f"Sending request to {url} with thread_id: {thread_id}")
         response = requests.post(url, json=payload, timeout=120)
         
         if response.status_code == 200:
@@ -162,8 +152,8 @@ async def answer_prompts(transcripts, channel):
         transcripts (dict): Dictionary of user IDs to transcripts with timestamps
         channel (discord.TextChannel): Channel to send responses in
     """
-    print("[DEBUG] Starting answer_prompts")
-    print(f"[DEBUG] Received transcripts type: {type(transcripts)}")
+    logger.info("Starting answer_prompts")
+    logger.info(f"Received transcripts type: {type(transcripts)}")
     
     # Create timestamp for thread name
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -174,7 +164,7 @@ async def answer_prompts(transcripts, channel):
     
     # Create the thread
     thread = await initial_message.create_thread(name=thread_name)
-    print(f"[DEBUG] Created thread: {thread_name}")
+    logger.info(f"Created thread: {thread_name}")
     
     # First message in thread summarizing participants
     participants = ", ".join(transcripts.keys())
@@ -217,7 +207,7 @@ async def answer_prompts(transcripts, channel):
     if current_message:
         await thread.send(current_message)
     
-    print(f"[DEBUG] Sent interlaced timeline in thread")
+    logger.info(f"Sent interlaced timeline in thread")
 
 async def get_related_topics(message: str) -> str:
     """Get related topics for a message
@@ -248,10 +238,10 @@ async def get_related_topics(message: str) -> str:
             topics = result['result']
             return topics
         else:
-            print(f"[ERROR] API returned status code {response.status_code}: {response.text}")
+            logger.error(f"API returned status code {response.status_code}: {response.text}")
             return "Related topics service not available at the moment."
     except Exception as e:
-        print(f"[ERROR] Exception in get_related_topics: {str(e)}")
+        logger.error(f"Exception in get_related_topics: {str(e)}")
         return "Related topics service not available at the moment."
 
 async def fact_check_claim(claim: str) -> str:
@@ -282,10 +272,10 @@ async def fact_check_claim(claim: str) -> str:
             result = response.json()
             return result['result']
         else:
-            print(f"[ERROR] API returned status code {response.status_code}: {response.text}")
+            logger.error(f"API returned status code {response.status_code}: {response.text}")
             return "Fact checking service not available at the moment."
     except Exception as e:
-        print(f"[ERROR] Exception in fact_check_claim: {str(e)}")
+        logger.error(f"Exception in fact_check_claim: {str(e)}")
         return "Fact checking service not available at the moment."
 
 async def get_definition(term: str, context: str = None) -> str:
@@ -322,10 +312,10 @@ async def get_definition(term: str, context: str = None) -> str:
             result = response.json()
             return result['result']
         else:
-            print(f"[ERROR] API returned status code {response.status_code}: {response.text}")
+            logger.error(f"API returned status code {response.status_code}: {response.text}")
             return "Definition service not available at the moment."
     except Exception as e:
-        print(f"[ERROR] Exception in get_definition: {str(e)}")
+        logger.error(f"Exception in get_definition: {str(e)}")
         return "Definition service not available at the moment."
 
 async def extract_atomic_ideas(text: str) -> list:
@@ -347,10 +337,10 @@ async def extract_atomic_ideas(text: str) -> list:
             result = response.json()
             return result['ideas']
         else:
-            print(f"[ERROR] API returned status code {response.status_code}: {response.text}")
+            logger.error(f"API returned status code {response.status_code}: {response.text}")
             return []
     except Exception as e:
-        print(f"[ERROR] Exception in extract_atomic_ideas: {str(e)}")
+        logger.error(f"Exception in extract_atomic_ideas: {str(e)}")
         return []
 
 def check_api_health() -> bool:

@@ -55,8 +55,8 @@ def invoke_agent():
     """API endpoint for invoking the agent with an inquiry
     
     Expects a JSON payload with:
-    - 'inquiry': The inquiry to process with the agent
-    
+    - 'messages': A list of user messages to process with the agent
+    - 'thread_id': The thread ID for the conversation
     Returns a JSON response with the agent's reply
     """
     try:
@@ -64,11 +64,11 @@ def invoke_agent():
         
         data = request.get_json()
         
-        if not data or 'inquiry' not in data:
-            return jsonify({"error": "Missing 'inquiry' field in request"}), 400
+        if not data or 'messages' not in data:
+            return jsonify({"error": "Missing 'messages' field in request"}), 400
             
-        inquiry = data['inquiry']
-        
+        messages = data['messages']
+        thread_id = data.get('thread_id', None)
         # Initialize the agent if not already done
         if not chat_agent or not chat_agent.graph:
             anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -89,7 +89,7 @@ def invoke_agent():
             )
         
         # Get the response from the agent
-        response = chat_agent.run_with_message(inquiry)
+        response = chat_agent.run_with_message(messages, thread_id=thread_id)
         
         return jsonify({
             "response": response
