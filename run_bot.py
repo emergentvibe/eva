@@ -264,6 +264,76 @@ async def summarize(ctx, messages: discord.Option(int, "Number of messages to su
         print(traceback.format_exc())
         await processing_msg.edit(content=f"Sorry, I couldn't summarize those messages. Error: {str(e)}")
 
+@bot.command(description="Load past messages into conversation history")
+async def load_history(ctx, message_count: discord.Option(int, "Number of past messages to load", min_value=1, max_value=100, default=20)):
+    """Load past messages from this channel into the conversation history
+    
+    Args:
+        ctx (discord.context): Discord context
+        message_count (int): Number of messages to load (default: 20, max: 100)
+    """
+    channel_id = ctx.channel.id
+    
+    # Check if we need to initialize tracking first
+    if channel_id not in tracked_channels:
+        # Generate a unique thread ID for this conversation
+        thread_id = f"channel_{channel_id}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # Start tracking with empty message history
+        tracked_channels[channel_id] = {
+            "thread_id": thread_id,
+            "messages": [],
+            "started_at": datetime.datetime.now()
+        }
+        logger.info(f"Initialized tracking in channel {channel_id} for load_history command")
+    
+    # Send a processing message
+    processing_msg = await ctx.respond(f"Loading the last {message_count} messages into conversation history, please wait...")
+    
+    try:
+        # Fetch message history, ignoring bot messages and commands
+        messages_loaded = 0
+        temp_history = []
+        
+        async for message in ctx.channel.history(limit=200):  # Higher limit to ensure we find enough valid messages
+            # Skip bot messages and commands
+            if message.author.bot or message.content.startswith('/') or message.content.startswith('!'):
+                continue
+                
+            # Add to temporary history with author name
+            temp_history.append({
+                "role": "user", 
+                "content": f"{message.author.display_name}: {message.content}",
+                "timestamp": message.created_at
+            })
+            
+            messages_loaded += 1
+            
+            # Stop once we have enough messages
+            if messages_loaded >= message_count:
+                break
+        
+        # If we couldn't find enough messages
+        if messages_loaded == 0:
+            await processing_msg.edit(content="No valid messages found to load into history.")
+            return
+            
+        # Sort the temporary history by timestamp (oldest first)
+        temp_history.sort(key=lambda x: x["timestamp"])
+        
+        # Clear the current history and add the new messages without timestamps
+        tracked_channels[channel_id]["messages"] = [
+            {"role": msg["role"], "content": msg["content"]} for msg in temp_history
+        ]
+        
+        logger.info(f"Loaded {messages_loaded} messages into history for channel {channel_id}")
+        await processing_msg.edit(content=f"Successfully loaded {messages_loaded} messages into conversation history. You can now mention me to engage with this context.")
+            
+    except Exception as e:
+        logger.error(f"Error in load_history command: {str(e)}")
+        logger.error(traceback.format_exc())
+        await processing_msg.edit(content=f"Sorry, I couldn't load the message history. Error: {str(e)}")
+
 #login event
 @bot.event
 async def on_ready():
@@ -308,10 +378,6 @@ def add_message_to_tracking(channel_id, author_name, content):
         
         # Add to the history
         tracked_channels[channel_id]["messages"].append(message_obj)
-        
-        # Cap the history at 20 messages to prevent the context from getting too large
-        if len(tracked_channels[channel_id]["messages"]) > 20:
-            tracked_channels[channel_id]["messages"].pop(0)
 
 @bot.event
 async def on_message(message):
