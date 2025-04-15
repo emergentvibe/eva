@@ -409,8 +409,9 @@ async def on_message(message):
         try:
             # Create messages array for the agent starting with the user's current message
             mentioning_username = message.author.display_name
+            current_message_content = f"{mentioning_username}: {mention_message}"
             
-            messages = []
+            messages = [{"role": "user", "content": current_message_content}]
             
             # First, add tracked conversation history if available
             if channel_id in tracked_channels:

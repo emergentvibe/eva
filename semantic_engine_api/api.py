@@ -24,7 +24,7 @@ atomic_idea_extractor = get_atomic_idea_extractor()
 chat_agent = None
 
 # Base prompt for the agent
-AGENT_PROMPT = """You are an AI assistant specialized in explaining messages and providing helpful information. 
+AGENT_PROMPT = """You are an AI assistant called Eva, situated in a discord server for the Open Reseearch Institute. You are specialized in summarizing conversations and providing helpful information. You have access to a search engine. When you use the search engine, always include the urls of the pages you found your answer from to your answer to the user.
 Be clear, concise, and helpful in your responses. Avoid judgment and maintain a neutral tone."""
 
 @app.route('/api/summarize', methods=['POST'])
