@@ -41,6 +41,9 @@ if not api_ready:
 bot = discord.Bot(intents=discord.Intents.all())  # We need message content and reaction intents
 connections = {}
 
+# Dictionary to store tracked channels with their messages and thread IDs
+tracked_channels = {}
+
 class MyView(discord.ui.View): # Create a class called MyView that subclasses discord.ui.View
     """a class that subclasses discord.ui.View that will display buttons to control the bot
     """
@@ -68,6 +71,61 @@ class MyView(discord.ui.View): # Create a class called MyView that subclasses di
             await interaction.response.edit_message(content = "You Can Start recording!",  view=MyView(self.ctx,self.vc))
         else:
             await self.ctx.respond("I am currently not recording here.")  # Respond with this if we aren't recording.
+
+@bot.command(description="Start tracking conversation in this channel")
+async def track(ctx):
+    """Start tracking conversation in this channel
+    
+    Args:
+        ctx (discord.context): Discord context
+    """
+    channel_id = ctx.channel.id
+    
+    # Check if already tracking this channel
+    if channel_id in tracked_channels:
+        await ctx.respond("I'm already tracking conversation in this channel.", ephemeral=True)
+        return
+    
+    # Generate a unique thread ID for this conversation
+    thread_id = f"channel_{channel_id}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+    
+    # Start tracking with empty message history
+    tracked_channels[channel_id] = {
+        "thread_id": thread_id,
+        "messages": [],
+        "started_at": datetime.datetime.now()
+    }
+    
+    logger.info(f"Started tracking conversation in channel {channel_id} with thread_id {thread_id}")
+    await ctx.respond("I'm now tracking conversation in this channel. Mention me to engage with the conversation context.", ephemeral=False)
+
+@bot.command(description="Stop tracking conversation in this channel")
+async def stop_tracking(ctx):
+    """Stop tracking conversation in this channel
+    
+    Args:
+        ctx (discord.context): Discord context
+    """
+    channel_id = ctx.channel.id
+    
+    # Check if we're tracking this channel
+    if channel_id not in tracked_channels:
+        await ctx.respond("I'm not tracking conversation in this channel.", ephemeral=True)
+        return
+    
+    # Get tracking info for logging
+    thread_id = tracked_channels[channel_id]["thread_id"]
+    message_count = len(tracked_channels[channel_id]["messages"])
+    started_at = tracked_channels[channel_id]["started_at"]
+    duration = datetime.datetime.now() - started_at
+    
+    # Remove the channel from tracking
+    del tracked_channels[channel_id]
+    
+    logger.info(f"Stopped tracking conversation in channel {channel_id} (thread_id: {thread_id})")
+    logger.info(f"Tracked {message_count} messages over {duration}")
+    
+    await ctx.respond(f"I've stopped tracking conversation in this channel. I collected {message_count} messages over {duration}.", ephemeral=False)
 
 async def once_done(sink: discord.sinks, channel: discord.TextChannel):
     """Callback function after recording is finished. Process audio input and pass it to chatGPT, then send response in chat.
@@ -221,6 +279,140 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
+# Helper function to get reference message from the message
+def get_reference_message(message):
+    """Get the reference message if available
+    
+    Args:
+        message (discord.Message): The message to check for references
+        
+    Returns:
+        discord.Message or None: The referenced message if available
+    """
+    if message.reference and message.reference.resolved:
+        return message.reference.resolved
+    return None
+
+# Helper function to add a message to the tracking history
+def add_message_to_tracking(channel_id, author_name, content):
+    """Add a message to the tracked history for a channel
+    
+    Args:
+        channel_id (int): Channel ID
+        author_name (str): Message author's name
+        content (str): Message content
+    """
+    if channel_id in tracked_channels:
+        # Format the message
+        message_obj = {"role": "user", "content": f"{author_name}: {content}"}
+        
+        # Add to the history
+        tracked_channels[channel_id]["messages"].append(message_obj)
+        
+        # Cap the history at 20 messages to prevent the context from getting too large
+        if len(tracked_channels[channel_id]["messages"]) > 20:
+            tracked_channels[channel_id]["messages"].pop(0)
+
+@bot.event
+async def on_message(message):
+    # Don't respond to our own messages
+    if message.author == bot.user:
+        return
+    
+    channel_id = message.channel.id
+    
+    # If we're tracking this channel, add the message to the tracking
+    if channel_id in tracked_channels and not message.content.startswith('/'):
+        add_message_to_tracking(channel_id, message.author.display_name, message.content)
+        logger.debug(f"Added message to tracking for channel {channel_id}")
+        
+    # Check if eva is tagged in the message
+    if bot.user.mentioned_in(message):
+        logger.info(f"EVA tagged by {message.author.display_name}")
+        
+        # Get the reply reference
+        reference_message = get_reference_message(message)
+        
+        # Get any additional explanation request 
+        parts = message.content.split(' ', 1)
+        mention_message = parts[1].strip() if len(parts) > 1 else ""
+        
+        # Send a processing message
+        processing_msg = await message.reply("Generating reply, please wait...")
+        
+        try:
+            # Create messages array for the agent starting with the user's current message
+            mentioning_username = message.author.display_name
+            
+            messages = []
+            
+            # First, add tracked conversation history if available
+            if channel_id in tracked_channels:
+                messages.extend(tracked_channels[channel_id]["messages"].copy())
+            
+            # If there is a reference message, add it before the current message if not already in history
+            if reference_message:
+                reference_username = reference_message.author.display_name
+                reference_content = f"{reference_username}: {reference_message.content}"
+                
+                # Check if this reference is already in our history (to avoid duplicates)
+                reference_already_included = False
+                for msg in messages:
+                    if msg["content"] == reference_content:
+                        reference_already_included = True
+                        break
+                
+                if not reference_already_included:
+                    messages.append({"role": "user", "content": reference_content})
+        
+            # Get the thread_id for this channel if we're tracking it
+            thread_id = tracked_channels.get(channel_id, {}).get("thread_id", 
+                str(channel_id) + ":" + str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            
+            # Call the agent service with the messages
+            logger.info(f"Calling agent API with {len(messages)} messages and thread_id {thread_id}")
+            reply = await invoke_agent(
+                messages, 
+                thread_id=thread_id
+            )
+            
+            if not reply or reply.startswith("Error"):
+                logger.error(f"Agent API returned error: {reply}")
+                await processing_msg.edit(content=f"Sorry, I couldn't respond to that message: {reply}")
+                return
+            
+            logger.info("Received reply from agent API, sending reply")
+            
+            # If we're tracking, add the bot's response to the conversation too
+            if channel_id in tracked_channels:
+                bot_message_obj = {"role": "assistant", "content": reply}
+                tracked_channels[channel_id]["messages"].append(bot_message_obj)
+                
+                # Cap the history at 20 messages
+                if len(tracked_channels[channel_id]["messages"]) > 20:
+                    tracked_channels[channel_id]["messages"].pop(0)
+            
+            # Split the reply into chunks if needed (Discord has a 2000 character limit)
+            reply_chunks = [reply[i:i+1900] for i in range(0, len(reply), 1900)]
+            
+            # Edit the processing message for the first chunk
+            await processing_msg.edit(content=reply_chunks[0])
+            
+            # Send any additional chunks as new messages
+            for chunk in reply_chunks[1:]:
+                await message.channel.send(chunk)
+            
+            logger.info(f"Successfully completed reply for {message.author.display_name}")
+                
+        except Exception as e:
+            # Log the full exception with traceback
+            error_traceback = traceback.format_exc()
+            logger.error(f"Error in on_message event: {str(e)}")
+            logger.error(f"Traceback: {error_traceback}")
+            
+            # Give the user a detailed error message
+            await processing_msg.edit(content=f"Sorry, I couldn't respond to your message. An error occurred: {str(e)}")
+
 @bot.event
 async def on_reaction_add(reaction, user):
     """Handle reaction adds to messages"""
@@ -258,74 +450,6 @@ async def on_reaction_add(reaction, user):
         finally:
             # Delete the processing message
             await processing_msg.delete()
-# A command to interact with the bot directly
-@bot.event
-async def on_message(message):
-    # Don't respond to our own messages
-    if message.author == bot.user:
-        return
-        
-    # Check if eva is tagged in the message
-    if bot.user.mentioned_in(message):
-        logger.info(f"EVA tagged by {message.author.display_name}")
-        
-        # Get the reply reference
-        if message.reference and message.reference.resolved:
-            reference_message = message.reference.resolved
-        else:
-            reference_message = None
-        
-        # Get any additional explanation request 
-        parts = message.content.split(' ', 1)
-        mention_message = parts[1].strip() if len(parts) > 1 else ""
-        
-        # Send a processing message
-        processing_msg = await message.reply("Generating reply, please wait...")
-        
-        try:
-            # Get usernames
-            mentioning_username = message.author.display_name
-
-            messages = [
-                {"role": "user", "content": mentioning_username + ": " + mention_message}
-            ]
-            
-            # If there is a reference message, add it to the messages structure
-            if reference_message:
-                reference_username = reference_message.author.display_name
-                messages.insert(0, {"role": "user", "content": reference_username + ": " + reference_message.content})
-            
-            # Call the agent service with the explanation inquiry
-            logger.info(f"Calling agent API with request: {mention_message}")
-            reply = await invoke_agent(
-                messages, 
-                thread_id=str(message.channel.id) + ":" + str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            )
-            
-            if not reply or reply.startswith("Error"):
-                logger.error(f"Agent API returned error: {reply}")
-                await processing_msg.edit(content=f"Sorry, I couldn't explain that message: {reply}")
-                return
-            
-            logger.info("Received reply from agent API, sending reply")
-            
-            # Split the reply into chunks if needed (Discord has a 2000 character limit)
-            reply_chunks = [reply[i:i+1900] for i in range(0, len(reply), 1900)]
-            
-            # Send the reply chunks in the same channel
-            for chunk in reply_chunks:
-                await message.channel.send(chunk)
-            
-            logger.info(f"Successfully completed reply for {message.author.display_name}")
-                
-        except Exception as e:
-            # Log the full exception with traceback
-            error_traceback = traceback.format_exc()
-            logger.error(f"Error in !explain command: {str(e)}")
-            logger.error(f"Traceback: {error_traceback}")
-            
-            # Give the user a detailed error message
-            await processing_msg.edit(content=f"Sorry, I couldn't explain that message. An error occurred: {str(e)}")
 
 # Run bot
 if __name__ == "__main__":
