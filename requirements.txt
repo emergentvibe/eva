@@ -8,3 +8,8 @@ flask==2.3.3
 anthropic==0.48.0
 gunicorn==21.2.0
 requests
+langchain-anthropic>=0.1.1
+langchain-core>=0.1.15
+langgraph>=0.0.27
+langchain-community>=0.0.16
+tavily-python>=0.2.2

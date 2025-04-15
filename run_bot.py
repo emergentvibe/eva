@@ -2,11 +2,23 @@ import discord
 import datetime
 import time
 import sys
+import traceback
 from credentials import DISCORD_BOT_TOKEN
-from utils import get_transcripts_from_audio_data, answer_prompts, summarize_message, check_api_health
+from utils import get_transcripts_from_audio_data, answer_prompts, summarize_message, check_api_health, invoke_agent
+
+# Configure more detailed logging
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("eva-bot")
 
 # Check API health before starting
-print("Checking API health...")
+logger.info("Checking API health...")
 max_retries = 5
 retry_count = 0
 api_ready = False
@@ -14,15 +26,15 @@ api_ready = False
 while retry_count < max_retries and not api_ready:
     if check_api_health():
         api_ready = True
-        print("API is healthy and ready!")
+        logger.info("API is healthy and ready!")
     else:
         retry_count += 1
-        print(f"API not ready, retrying in 5 seconds... (Attempt {retry_count}/{max_retries})")
+        logger.warning(f"API not ready, retrying in 5 seconds... (Attempt {retry_count}/{max_retries})")
         time.sleep(5)
 
 if not api_ready:
-    print("ERROR: API is not available. Please make sure the API is running.")
-    print("You can start the API with: python -m semantic_engine_api.run")
+    logger.error("API is not available. Please make sure the API is running.")
+    logger.error("You can start the API with: python -m semantic_engine_api.run")
     sys.exit(1)
 
 # Init bot
@@ -246,6 +258,84 @@ async def on_reaction_add(reaction, user):
         finally:
             # Delete the processing message
             await processing_msg.delete()
+
+# Add a message command version of explain that works directly with replies
+@bot.event
+async def on_message(message):
+    # Don't respond to our own messages
+    if message.author == bot.user:
+        return
+        
+    # Check if the message content starts with "!explain"
+    if message.content.lower().startswith("!explain"):
+        logger.info(f"Message command !explain triggered by {message.author.display_name}")
+        
+        # Get the reply reference
+        if not message.reference or not message.reference.resolved:
+            await message.reply("Please use this command as a reply to the message you want explained.")
+            return
+            
+        # Get the target message from the reply
+        target_message = message.reference.resolved
+        
+        # Get any additional explanation request (e.g., "!explain technical terms" -> "technical terms")
+        parts = message.content.split(' ', 1)
+        explain_what = parts[1].strip() if len(parts) > 1 else ""
+        
+        # Send a processing message
+        processing_msg = await message.reply("Generating explanation, please wait...")
+        
+        try:
+            # Get usernames
+            author_username = target_message.author.display_name
+            requester_username = message.author.display_name
+            
+            # Call the agent service with the explanation inquiry
+            logger.info(f"Calling agent API for explanation with request: {explain_what}")
+            explanation = await invoke_agent(
+                target_message.content, 
+                author_username, 
+                requester_username,
+                explain_what
+            )
+            
+            if not explanation or explanation.startswith("Error"):
+                logger.error(f"Agent API returned error: {explanation}")
+                await processing_msg.edit(content=f"Sorry, I couldn't explain that message: {explanation}")
+                return
+            
+            logger.info("Received explanation from agent API, creating thread")
+            
+            # Create a thread for the explanation
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            thread_name = f"Explanation {timestamp}"
+            
+            # Update the processing message with a reference to the original message
+            updated_msg = await processing_msg.edit(content=f"Explanation of {author_username}'s message:")
+            
+            # Create the thread
+            thread = await updated_msg.create_thread(name=thread_name)
+            
+            # Send the original message in the thread for context
+            await thread.send(f"**Original message from {author_username}:**\n{target_message.content}")
+            
+            # Split the explanation into chunks if needed (Discord has a 2000 character limit)
+            explanation_chunks = [explanation[i:i+1900] for i in range(0, len(explanation), 1900)]
+            
+            # Send the explanation chunks in the thread
+            for chunk in explanation_chunks:
+                await thread.send(chunk)
+            
+            logger.info(f"Successfully completed explanation for {message.author.display_name}")
+                
+        except Exception as e:
+            # Log the full exception with traceback
+            error_traceback = traceback.format_exc()
+            logger.error(f"Error in !explain command: {str(e)}")
+            logger.error(f"Traceback: {error_traceback}")
+            
+            # Give the user a detailed error message
+            await processing_msg.edit(content=f"Sorry, I couldn't explain that message. An error occurred: {str(e)}")
 
 # Run bot
 if __name__ == "__main__":

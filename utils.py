@@ -3,6 +3,15 @@ import whisper
 import requests
 import json
 import datetime
+import logging
+import traceback
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("eva-utils")
 
 # Initialize whisper model for audio transcription
 model = whisper.load_model("small")
@@ -19,7 +28,7 @@ def summarize_message(content: str) -> dict:
     Returns:
         dict: Dictionary containing 'title' and 'summary' keys
     """
-    print(f"[DEBUG] Summarizing message via API: {content[:100]}...")
+    logger.info(f"Summarizing message via API: {content[:100]}...")
     
     try:
         url = f"{API_BASE_URL}/summarize"
@@ -29,14 +38,83 @@ def summarize_message(content: str) -> dict:
         
         if response.status_code == 200:
             result = response.json()
-            print(f"[DEBUG] Summary received from API")
+            logger.info(f"Summary received from API")
             return result
         else:
-            print(f"[ERROR] API returned status code {response.status_code}: {response.text}")
+            logger.error(f"API returned status code {response.status_code}: {response.text}")
             return {"title": "Error generating summary", "summary": "An error occurred while generating the summary."}
     except Exception as e:
-        print(f"[ERROR] Exception in summarize_message: {str(e)}")
+        logger.error(f"Exception in summarize_message: {str(e)}")
+        logger.error(traceback.format_exc())
         return {"title": "Error generating summary", "summary": f"An error occurred: {str(e)}"}
+
+async def invoke_agent(message_content: str, author_username: str, requester_username: str, explanation_request: str = "") -> str:
+    """Invoke the agent with a constructed inquiry
+    
+    Args:
+        message_content (str): Content of the message to explain
+        author_username (str): Username of the message author
+        requester_username (str): Username of the person making the request
+        explanation_request (str, optional): What aspect to explain. Defaults to "".
+        
+    Returns:
+        str: Agent's response
+    """
+    logger.info(f"Invoking agent via API for message from {author_username}, requested by {requester_username}")
+    logger.info(f"Message content snippet: {message_content[:100]}...")
+    
+    if explanation_request:
+        logger.info(f"Explanation request: {explanation_request}")
+    
+    try:
+        # Construct the inquiry here rather than in the API
+        if explanation_request:
+            inquiry = f"{requester_username} is asking: Can you explain what {author_username} meant in this message, specifically about {explanation_request}? Message: {message_content}"
+        else:
+            inquiry = f"{requester_username} is asking: Can you explain what {author_username} meant in this message? Message: {message_content}"
+        
+        logger.debug(f"Full inquiry: {inquiry}")
+        url = f"{API_BASE_URL}/agent"
+        payload = {"inquiry": inquiry}
+        
+        logger.info(f"Sending request to {url}")
+        response = requests.post(url, json=payload, timeout=120)
+        
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"Response received from agent API with status code 200")
+            
+            if not result or "response" not in result:
+                logger.error(f"API returned unexpected response format: {result}")
+                return "Error: API returned unexpected response format"
+                
+            agent_response = result.get("response", "No response was generated.")
+            logger.info(f"Agent response snippet: {agent_response[:100]}...")
+            return agent_response
+        else:
+            logger.error(f"API returned status code {response.status_code}")
+            logger.error(f"Response text: {response.text}")
+            
+            # Try to parse error message from JSON if available
+            try:
+                error_data = response.json()
+                error_message = error_data.get("error", str(response.text))
+                logger.error(f"Error from API: {error_message}")
+                return f"Error from agent API: {error_message}"
+            except:
+                return f"Error from agent API: Status code {response.status_code}"
+    except requests.exceptions.Timeout:
+        error_msg = f"Request to agent API timed out after 120 seconds"
+        logger.error(error_msg)
+        return f"Error invoking agent: {error_msg}"
+    except requests.exceptions.ConnectionError:
+        error_msg = f"Connection error when connecting to agent API. Make sure the API server is running."
+        logger.error(error_msg)
+        return f"Error invoking agent: {error_msg}"
+    except Exception as e:
+        logger.error(f"Exception in invoke_agent: {str(e)}")
+        logger.error(traceback.format_exc())
+        return f"Error invoking agent: {str(e)}"
 
 async def get_transcripts_from_audio_data(audio_data):
     """Process audio data and return transcripts with timestamps
@@ -47,17 +125,17 @@ async def get_transcripts_from_audio_data(audio_data):
     Returns:
         dict: Dictionary of user IDs to transcripts with timestamps
     """
-    print("[DEBUG] Starting transcript processing")
-    print(f"[DEBUG] Audio data received: {list(audio_data.keys())}")
+    logger.info("Starting transcript processing")
+    logger.info(f"Audio data received: {list(audio_data.keys())}")
     
     transcripts = {}
     for user_id, audio in audio_data.items():
-        print(f"[DEBUG] Processing audio for user: {user_id}")
+        logger.info(f"Processing audio for user: {user_id}")
         filename = f"audio_{user_id}.wav"
         with open(filename, "wb") as f:
             f.write(audio.getvalue())
         
-        print(f"[DEBUG] Saved audio file: {filename}")
+        logger.info(f"Saved audio file: {filename}")
         # Transcribe with whisper and request word timestamps
         result = model.transcribe(filename, word_timestamps=True)
         
@@ -70,11 +148,11 @@ async def get_transcripts_from_audio_data(audio_data):
                 "end": segment["end"]
             })
         
-        print(f"[DEBUG] Transcribed {len(segments)} segments with timestamps")
+        logger.info(f"Transcribed {len(segments)} segments with timestamps")
         os.remove(filename)
         transcripts[user_id] = segments
     
-    print(f"[DEBUG] Final transcripts with timestamps: {transcripts}")
+    logger.debug(f"Final transcripts with timestamps: {transcripts}")
     return transcripts
 
 async def answer_prompts(transcripts, channel):
@@ -283,7 +361,21 @@ def check_api_health() -> bool:
     """
     try:
         url = f"{API_BASE_URL}/health"
+        logger.info(f"Checking API health at {url}")
         response = requests.get(url, timeout=5)
-        return response.status_code == 200
-    except:
+        if response.status_code == 200:
+            logger.info("API health check successful")
+            return True
+        else:
+            logger.error(f"API health check failed with status code: {response.status_code}")
+            return False
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error during API health check: {str(e)}")
+        return False
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Timeout during API health check: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Error during API health check: {str(e)}")
+        logger.error(traceback.format_exc())
         return False 

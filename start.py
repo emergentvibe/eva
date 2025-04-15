@@ -9,6 +9,7 @@ import subprocess
 import time
 import signal
 import logging
+import threading
 
 # Configure logging
 logging.basicConfig(
@@ -47,13 +48,18 @@ def start_bot():
     """Start the Eva Discord bot"""
     logger.info("Starting Eva Discord bot...")
     try:
+        # Enable exception tracebacks to be printed
+        env = os.environ.copy()
+        env['PYTHONFAULTHANDLER'] = '1'
+        
         bot_cmd = [sys.executable, "run_bot.py"]
         bot_process = subprocess.Popen(
             bot_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
-            bufsize=1
+            bufsize=1,
+            env=env
         )
         logger.info(f"Bot started with PID: {bot_process.pid}")
         return bot_process
@@ -61,20 +67,23 @@ def start_bot():
         logger.error(f"Failed to start bot: {str(e)}")
         return None
 
-def log_output(process, process_name):
-    """Log process output in a non-blocking way"""
-    while True:
-        output = process.stdout.readline()
-        if output == '' and process.poll() is not None:
-            break
-        if output:
-            logger.info(f"{process_name} | {output.strip()}")
+def log_stdout(process, process_name):
+    """Log process stdout in a non-blocking way"""
+    for line in iter(process.stdout.readline, ''):
+        if line:
+            logger.info(f"{process_name} | {line.strip()}")
     
-    # Check for errors on process exit
-    return_code = process.poll()
-    if return_code is not None and return_code != 0:
-        stderr = process.stderr.read()
-        logger.error(f"{process_name} exited with code {return_code}: {stderr}")
+    if process.poll() is not None:
+        logger.info(f"{process_name} stdout stream closed")
+
+def log_stderr(process, process_name):
+    """Log process stderr in a non-blocking way"""
+    for line in iter(process.stderr.readline, ''):
+        if line:
+            logger.error(f"{process_name} ERROR | {line.strip()}")
+    
+    if process.poll() is not None:
+        logger.info(f"{process_name} stderr stream closed")
 
 def cleanup(signum=None, frame=None):
     """Clean up processes on exit"""
@@ -121,16 +130,21 @@ if __name__ == "__main__":
             cleanup()
             sys.exit(1)
         
-        # Start output logging threads
-        import threading
-        api_log_thread = threading.Thread(target=log_output, args=(api_process, "API"))
-        bot_log_thread = threading.Thread(target=log_output, args=(bot_process, "BOT"))
+        # Start output logging threads - now separate stdout and stderr
+        api_stdout_thread = threading.Thread(target=log_stdout, args=(api_process, "API"))
+        api_stderr_thread = threading.Thread(target=log_stderr, args=(api_process, "API"))
+        bot_stdout_thread = threading.Thread(target=log_stdout, args=(bot_process, "BOT"))
+        bot_stderr_thread = threading.Thread(target=log_stderr, args=(bot_process, "BOT"))
         
-        api_log_thread.daemon = True
-        bot_log_thread.daemon = True
+        api_stdout_thread.daemon = True
+        api_stderr_thread.daemon = True
+        bot_stdout_thread.daemon = True
+        bot_stderr_thread.daemon = True
         
-        api_log_thread.start()
-        bot_log_thread.start()
+        api_stdout_thread.start()
+        api_stderr_thread.start()
+        bot_stdout_thread.start()
+        bot_stderr_thread.start()
         
         # Main monitoring loop
         while True:
